@@ -17,3 +17,27 @@ def crop_image(image, path=True):
     cropped_image = stitched_image[y:y+h, x:x+w]
 
     return cropped_image
+
+def remove_background(image, save=False, save_path=None):
+    # Convert image to image gray 
+    tmp = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) 
+      
+    # Applying thresholding technique 
+    _, alpha = cv2.threshold(tmp, 0, 255, cv2.THRESH_BINARY) 
+      
+    # Using cv2.split() to split channels  
+    # of coloured image 
+    b, g, r = cv2.split(image) 
+      
+    # Making list of Red, Green, Blue 
+    # Channels and alpha 
+    rgba = [b, g, r, alpha] 
+      
+    # Using cv2.merge() to merge rgba 
+    # into a coloured/multi-channeled image 
+    dst = cv2.merge(rgba, 4) 
+      
+    if save:
+      cv2.imwrite(f"{save_path}.png", dst)
+
+    return dst 

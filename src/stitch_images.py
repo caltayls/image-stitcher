@@ -1,10 +1,11 @@
 import numpy as np
 import cv2
-from src.crop_image import crop_image
+from src.utils import crop_image, remove_background
 import matplotlib.pyplot as plt
 import glob
-import skimage
-
+import re
+import shutil
+import os
 
 class Stitcher:
 
@@ -18,21 +19,21 @@ class Stitcher:
         matches, H, status = self.matchKeypoints(kpsA, kpsB, featuresA, featuresB, ratio, reprojThresh, descriptor)
         
         result = cv2.warpPerspective(
-            src=imageB, 
+            src=imageB,
             M=H,
             dsize=(imageA.shape[1] + imageB.shape[1], imageA.shape[0] + imageB.shape[0]),
             borderMode=5,
             flags=inter_flag
         )
+  
         result[0:imageA.shape[0], 0:imageA.shape[1]] = imageA
 
-    
+
         # check to see if the keypoint matches should be visualized
         if showMatches:
             self.drawMatches(imageA, imageB, kpsA, kpsB, matches)
     
         return result
-
 
     def detectAndDescribe(self, image, descriptor):
         try:
@@ -54,13 +55,12 @@ class Stitcher:
         # (kps, features) = detect.detectAndCompute(gray, None) # change image
         # return kps, features
 
-
     def matchKeypoints(self, kpsA, kpsB, featuresA, featuresB, ratio, reprojThresh, descriptor):
 
         if descriptor == 'sift':
             FLANN_INDEX_KDTREE = 1
             index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
-        
+
         if descriptor == 'orb':
             FLANN_INDEX_LSH = 6
             index_params= dict(
@@ -89,50 +89,48 @@ class Stitcher:
 
         return matches, H, status
 
-
     def drawMatches(self, image1, image2, kps1, kps2, matches):
-        
         output_image = cv2.drawMatches(image1,kps1,image2, kps2,matches[:100],None,flags=2)
         cv2.imshow('Output image',output_image)
         # return vis
     
 
+def stitch_show(images, is_path=True, ratio=0.7, reprojThresh=5, inter_flag=4, descriptor='orb', save_as=None, showMatches=False):
+    if is_path:
+        images = [cv2.imread(image_path) for image_path in images]
 
-def stitch_show(image_paths, is_path=True, flipped=False, ratio=0.7, reprojThresh=5, inter_flag=4, descriptor='orb', save_as=None, showMatches=False):
-    if flipped:
-        images = [cv2.flip(cv2.imread(image_path), 1) for image_path in image_paths[-1::-1]]
+    # if not flipped:
+    stitched = Stitcher().stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
+        # cropped = crop_image(stitched, path=False)
+  
+    # else:
+    images_flipped = [cv2.flip(image, 1) for image in images[-1::-1]]
+    stitched_flipped = Stitcher().stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
+    flip_back = cv2.flip(stitched_flipped, 1)
+        # cropped = crop_image(flip_back, path=False)
+  
 
-        stitched = Stitcher().stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
-        flip_back = cv2.flip(stitched, 1)
-        cropped = crop_image(flip_back, path=False)
-    else:
-        if is_path:
-            images = [cv2.imread(image_path) for image_path in image_paths]
-        else:
-            images = image_paths
-        stitched = Stitcher().stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
-        cropped = crop_image(stitched, path=False)
 
-    # cv2.imshow('stitched', cropped)
-    # cv2.waitKey()
-    # plt.imshow(cropped), plt.show()
-    
+    plot2(stitched, flip_back)
+
+    while True:
+        print('normal or flipped?')
+        user_inp = input()
+
+        if user_inp == 'normal':
+            flipped = False
+            img = crop_image(stitched, path=False)
+            break
+        elif user_inp == 'flipped':
+            flipped = True
+            img = crop_image(flip_back, path=False)
+            break
+
     if save_as is not None:
-        cv2.imwrite(f'{save_as}.jpg', cropped)
+        img = remove_background(img)
+        cv2.imwrite(f'{save_as}.png', img)
     
 
-
-
-def stitch_multiple(paths, flipped=False, ratio=0.7, reprojThresh=5):
-    for i in range(len(paths)-1):
-        image_paths = paths[i:i+2]
-        image1_name = image_paths[0].split('\\')[-1].split('.')[0]
-        image2_name = image_paths[1].split('\\')[-1].split('.')[0]
-        file_name = f"{image1_name}-{image2_name}"
-        if flipped:
-            file_name = file_name + "_flipped"
-        stitch_show(image_paths, descriptor='orb', flipped=flipped, ratio=ratio, reprojThresh=reprojThresh, showMatches=True, save_as=file_name)
-       
 
 def plot2(im1, im2):
     fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
@@ -141,16 +139,40 @@ def plot2(im1, im2):
     plt.show()
 
 
+paths = glob.glob(r'images\battersea\stitched\52\stitched/*')
+paths = sorted(paths, key=os.path.getctime)
+
+pattern = re.compile("(\d+_\d+_?)+")
+
+stitch_show(
+    [r"images\battersea\stitched\53\stitched.png", r"images\battersea\raw\53\5308.png"],
+    save_as=f'images/battersea/stitched/53/stitched'
+)
 
 
-if __name__ == '__main__':
+def stitch_all(image_folder, destination):
+    paths = glob.glob(f'{image_folder}/*')
 
-    paths = glob.glob(r'images\battersea\raw\*')
-    # paths = [r"images\battersea\raw\5304.png", r"images\tyneside_1953_aerial\raw\5305.png"]
-    # paths = [r"C:\Users\callu\OneDrive\Pictures\jarrow_oblique\factory\facing_ya\im1.png", r"C:\Users\callu\OneDrive\Pictures\jarrow_oblique\factory\facing_ya\im2.png"]
+    path_pattern = re.compile("\d{4}")
+    order = [int(path_pattern.search(path).group(0)) for path in paths]
+    indices_sorted = np.argsort(order)
+    paths = [paths[i] for i in indices_sorted]
 
-    # stitch_multiple(paths, flipped=True, ratio=0.9, reprojThresh=5)
+
+    shutil.copy(paths[0], f"{destination}/stitched.png")
     
+    for path in paths[1:]:
+        print(path)
+        stitch_show(
+            [f"{destination}/stitched.png", path],
+            save_as=f"{destination}/stitched"
+        )
 
-    stitch_show(paths, showMatches=False, save_as=f'0405')
+stitch_all(r"images\battersea\raw\52", r"images\battersea\stitched\52")
+
+
+stitch_show(
+    [r"images\battersea\stitched\52\stitched.png", r"images\battersea\stitched\53\stitched.png"],
+    save_as=f'images/battersea/stitched/52-53'
+)
 
