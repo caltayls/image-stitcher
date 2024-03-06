@@ -1,14 +1,14 @@
 import cv2
 
-def crop_image(image, path=True):
+def crop_image(image, path=False):
     if path:
         stitched_image = cv2.imread(image)
     else:
         stitched_image = image
     # Convert the stitched image to grayscale
-    gray_stitched = cv2.cvtColor(stitched_image, cv2.COLOR_BGR2GRAY)
+    # gray_stitched = cv2.cvtColor(stitched_image, cv2.COLOR_BGR2GRAY)
     # Threshold the image to create a binary mask
-    _, binary_mask = cv2.threshold(gray_stitched, 1, 255, cv2.THRESH_BINARY)
+    _, binary_mask = cv2.threshold(stitched_image, 1, 255, cv2.THRESH_BINARY)
     # Find non-zero (foreground) pixels in the binary mask
     non_zero_pixels = cv2.findNonZero(binary_mask)
     # Compute the bounding box that encloses the non-zero pixels
@@ -20,10 +20,10 @@ def crop_image(image, path=True):
 
 def remove_background(image, save=False, save_path=None):
     # Convert image to image gray 
-    tmp = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) 
+    # tmp = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) 
       
     # Applying thresholding technique 
-    _, alpha = cv2.threshold(tmp, 0, 255, cv2.THRESH_BINARY) 
+    _, alpha = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY) 
       
     # Using cv2.split() to split channels  
     # of coloured image 

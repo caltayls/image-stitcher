@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import cv2
 from src.utils import crop_image, remove_background
 import matplotlib.pyplot as plt
@@ -10,36 +11,37 @@ import os
 class Stitcher:
 
     def stitch(self, images, ratio=0.75, reprojThresh=4.0,showMatches=False, inter_flag=0, descriptor='orb'):
-    # unpack the images, then detect keypoints and extract
-    # local invariant descriptors from them
         imageA, imageB = images
         kpsA, featuresA = self.detectAndDescribe(imageA, descriptor)
         kpsB, featuresB = self.detectAndDescribe(imageB, descriptor)
         # match features between the two images
         matches, H, status = self.matchKeypoints(kpsA, kpsB, featuresA, featuresB, ratio, reprojThresh, descriptor)
         
-        result = cv2.warpPerspective(
+        imageB_warped = cv2.warpPerspective(
             src=imageB,
             M=H,
-            dsize=(imageA.shape[1] + imageB.shape[1], imageA.shape[0] + imageB.shape[0]),
+            dsize=(imageA.shape[1] + imageB.shape[1] + 2000, imageA.shape[0] + imageB.shape[0] + 2000),
             borderMode=5,
             flags=inter_flag
         )
   
-        result[0:imageA.shape[0], 0:imageA.shape[1]] = imageA
+        combined_image = imageB_warped.copy()
+        combined_image[0:imageA.shape[0], 0:imageA.shape[1]] = imageA
+
+        # Remove unwanted black pixels caused by superimposing A onto B
+        combined_image_imprvd = self.patch_black_cells(imageA, imageB_warped, combined_image)
 
 
         # check to see if the keypoint matches should be visualized
         if showMatches:
             self.drawMatches(imageA, imageB, kpsA, kpsB, matches)
     
-        return result
+        return combined_image_imprvd
 
     def detectAndDescribe(self, image, descriptor):
         try:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) # uncomment
         except:
-            print('already gray')
             gray = image
 
         # detect and extract features from the image
@@ -93,61 +95,91 @@ class Stitcher:
         output_image = cv2.drawMatches(image1,kps1,image2, kps2,matches[:100],None,flags=2)
         cv2.imshow('Output image',output_image)
         # return vis
+
+        
+    def patch_black_cells(self, imageA, warped, combined):
+
+        # black cells in imgA to replace
+        a_black_cells = np.argwhere(imageA == 0)
+        img1_black = pd.DataFrame(a_black_cells)
+
+        # indices of warped image B
+        b_indices = np.argwhere(warped != 0)
+        b_cells = pd.DataFrame(b_indices)
+
+
+        shared = pd.merge(img1_black, b_cells, how='inner').values
+
+        for i, j in shared:
+            combined[i, j] = warped[i, j]
+
+                    
+        return combined
     
 
 def stitch_show(images, is_path=True, ratio=0.7, reprojThresh=5, inter_flag=4, descriptor='orb', save_as=None, showMatches=False):
     if is_path:
-        images = [cv2.imread(image_path) for image_path in images]
+        images = [cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2GRAY)  for image_path in images]
 
+    stitcher = Stitcher()
     # if not flipped:
-    stitched = Stitcher().stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
-        # cropped = crop_image(stitched, path=False)
-  
+    im1 = stitcher.stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
+    im1 = crop_image(im1)
+
     # else:
     images_flipped = [cv2.flip(image, 1) for image in images[-1::-1]]
-    stitched_flipped = Stitcher().stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
-    flip_back = cv2.flip(stitched_flipped, 1)
-        # cropped = crop_image(flip_back, path=False)
+    stitched_flipped = stitcher.stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
+    im2 = cv2.flip(stitched_flipped, 1)
+    im2 = crop_image(im2)
+
+    
+
+
+    # image 2 first
+        # if not flipped:
+    im3 = stitcher.stitch(images[-1::-1], descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
+    im3 = crop_image(im3)
+
   
+    # else:
+    images_flipped = [cv2.flip(image, 1) for image in images]
+    stitched_flipped = stitcher.stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
+    im4 = crop_image(cv2.flip(stitched_flipped, 1))
 
 
-    plot2(stitched, flip_back)
+
+    plot2(im1, im2, im3, im4)
 
     while True:
-        print('normal or flipped?')
+        print('Image 1, 2, 3, or 4?')
         user_inp = input()
 
-        if user_inp == 'normal':
-            flipped = False
-            img = crop_image(stitched, path=False)
+        if user_inp == '1':
+            img = crop_image(im1, path=False)
             break
-        elif user_inp == 'flipped':
-            flipped = True
-            img = crop_image(flip_back, path=False)
+        elif user_inp == '2':
+            img = crop_image(im2, path=False)
+            break
+        elif user_inp == '3':
+            img = crop_image(im3, path=False)
+            break
+        elif user_inp == '4':
+            img = crop_image(im4, path=False)
             break
 
     if save_as is not None:
-        img = remove_background(img)
+        # img = remove_background(img)
         cv2.imwrite(f'{save_as}.png', img)
     
 
 
-def plot2(im1, im2):
-    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+def plot2(im1, im2, im3, im4):
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
     ax1.imshow(im1)
     ax2.imshow(im2)
+    ax3.imshow(im3)
+    ax4.imshow(im4)
     plt.show()
-
-
-paths = glob.glob(r'images\battersea\stitched\52\stitched/*')
-paths = sorted(paths, key=os.path.getctime)
-
-pattern = re.compile("(\d+_\d+_?)+")
-
-stitch_show(
-    [r"images\battersea\stitched\53\stitched.png", r"images\battersea\raw\53\5308.png"],
-    save_as=f'images/battersea/stitched/53/stitched'
-)
 
 
 def stitch_all(image_folder, destination):
@@ -168,11 +200,19 @@ def stitch_all(image_folder, destination):
             save_as=f"{destination}/stitched"
         )
 
-stitch_all(r"images\battersea\raw\52", r"images\battersea\stitched\52")
 
 
-stitch_show(
-    [r"images\battersea\stitched\52\stitched.png", r"images\battersea\stitched\53\stitched.png"],
-    save_as=f'images/battersea/stitched/52-53'
-)
 
+# stitch_show(
+#     [r"images\battersea\raw\53\5307.png", r"images\battersea\raw\52\5211.png"],
+#     save_as=f'images/battersea/stitched/5307-5211'
+# )
+
+
+# stitch_show(
+#     [r"images\battersea\raw\52\5209.png", r"images\battersea\stitched\5305-08-5209-12.png", ],
+#     save_as=r'images\battersea\stitched\5305-08-5209-13'
+# )
+
+
+stitch_show([r"images\battersea\raw\53\5305.png", r"images\battersea\raw\53\5304.png"], save_as=r'images\battersea\stitched\test111')
