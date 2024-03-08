@@ -1,7 +1,11 @@
 import numpy as np
 import pandas as pd
 import cv2
-from src.utils import crop_image, remove_background
+try:
+    from src.utils import crop_image, remove_background
+except:
+    from utils import crop_image, remove_background
+
 import matplotlib.pyplot as plt
 import glob
 import re
@@ -29,14 +33,14 @@ class Stitcher:
         combined_image[0:imageA.shape[0], 0:imageA.shape[1]] = imageA
 
         # Remove unwanted black pixels caused by superimposing A onto B
-        combined_image_imprvd = self.patch_black_cells(imageA, imageB_warped, combined_image)
+        combined_image = self.patch_black_cells(imageA, imageB_warped, combined_image)
 
 
         # check to see if the keypoint matches should be visualized
         if showMatches:
             self.drawMatches(imageA, imageB, kpsA, kpsB, matches)
     
-        return combined_image_imprvd
+        return combined_image
 
     def detectAndDescribe(self, image, descriptor):
         try:
@@ -117,102 +121,139 @@ class Stitcher:
         return combined
     
 
-def stitch_show(images, is_path=True, ratio=0.7, reprojThresh=5, inter_flag=4, descriptor='orb', save_as=None, showMatches=False):
+def stitch_show(images, is_path=True, automate=True, ratio=0.7, reprojThresh=5, inter_flag=4, descriptor='orb', save_as=None, showMatches=False):
     if is_path:
         images = [cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2GRAY)  for image_path in images]
-
+    
+    processed_images = []
     stitcher = Stitcher()
-    # if not flipped:
+    #determine order of merge:
     im1 = stitcher.stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
     im1 = crop_image(im1)
 
+    im1_alt = stitcher.stitch(images[-1::-1], descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
+    im1_alt = crop_image(im1)
+
+    print(im1.shape, im1.shape[0] * im1.shape[1])
+    print(im1_alt.shape, im1_alt.shape[0] * im1_alt.shape[1])
+
+    if im1_alt.shape[0] * im1_alt.shape[1] > im1.shape[0] * im1.shape[1]:
+        print(im1.shape, im1.shape[0] * im1.shape[1])
+        print(im1_alt.shape, im1_alt.shape[0] * im1_alt.shape[1])
+        im1 = im1_alt
+        images = images[-1::-1]
+    
+    
+    processed_images.append(im1)
+
+
     # else:
+    images_flipped = [cv2.flip(image, -1) for image in images[-1::-1]]
+    stitched_flipped = stitcher.stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
+    im2 = cv2.flip(stitched_flipped, -1)
+    im2 = crop_image(im2)
+    processed_images.append(im2)
+
+
+    v_flip = [cv2.flip(image, 0) for image in images]
+    im3 = stitcher.stitch(v_flip, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
+    im3 = cv2.flip(im3, 0)
+    im3 = crop_image(im3)
+    processed_images.append(im3)
+
+
     images_flipped = [cv2.flip(image, 1) for image in images[-1::-1]]
     stitched_flipped = stitcher.stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
-    im2 = cv2.flip(stitched_flipped, 1)
-    im2 = crop_image(im2)
+    im4 = cv2.flip(stitched_flipped, 1)
+    im4 = crop_image(im4)
+    processed_images.append(im4)
 
+    if automate:
+        image_sizes = [image.shape[0] * image.shape[1] for image in processed_images]
+        largest_image = np.argmax(image_sizes)
+        cv2.imwrite(save_as, processed_images[largest_image])
+
+
+    else:
+        show_images(im1, im2, im3, im4)
+
+        while True:
+            print('Image 1, 2, 3, or 4?')
+            user_inp = input()
+
+            if user_inp == '1':
+                img = im1
+                break
+            elif user_inp == '2':
+                img = im2
+                break
+            elif user_inp == '3':
+                img = im3
+                break
+            elif user_inp == '4':
+                img = im4
+                break
+
+        if save_as is not None:
+            # img = remove_background(img)
+            cv2.imwrite(save_as, img)
     
 
 
-    # image 2 first
-        # if not flipped:
-    im3 = stitcher.stitch(images[-1::-1], descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
-    im3 = crop_image(im3)
-
-  
-    # else:
-    images_flipped = [cv2.flip(image, 1) for image in images]
-    stitched_flipped = stitcher.stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
-    im4 = crop_image(cv2.flip(stitched_flipped, 1))
-
-
-
-    plot2(im1, im2, im3, im4)
-
-    while True:
-        print('Image 1, 2, 3, or 4?')
-        user_inp = input()
-
-        if user_inp == '1':
-            img = crop_image(im1, path=False)
-            break
-        elif user_inp == '2':
-            img = crop_image(im2, path=False)
-            break
-        elif user_inp == '3':
-            img = crop_image(im3, path=False)
-            break
-        elif user_inp == '4':
-            img = crop_image(im4, path=False)
-            break
-
-    if save_as is not None:
-        # img = remove_background(img)
-        cv2.imwrite(f'{save_as}.png', img)
-    
-
-
-def plot2(im1, im2, im3, im4):
+def show_images(im1, im2, im3, im4):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
     ax1.imshow(im1)
+    ax1.set_title('Image 1')
     ax2.imshow(im2)
+    ax2.set_title('Image 2')
     ax3.imshow(im3)
+    ax3.set_title('Image 3')
     ax4.imshow(im4)
+    ax4.set_title('Image 4')
     plt.show()
 
 
-def stitch_all(image_folder, destination):
-    paths = glob.glob(f'{image_folder}/*')
+def stitch_all(paths, destination, is_list=False, automate=True):
+    if not is_list:
+        paths = glob.glob(paths)
+        path_pattern = re.compile(r"\d{4}")
+        order = [int(path_pattern.findall(path)[-1]) for path in paths]
+        print(order)
+        indices_sorted = np.argsort(order)
+        paths = [paths[i] for i in indices_sorted]
 
-    path_pattern = re.compile("\d{4}")
-    order = [int(path_pattern.search(path).group(0)) for path in paths]
-    indices_sorted = np.argsort(order)
-    paths = [paths[i] for i in indices_sorted]
-
-
-    shutil.copy(paths[0], f"{destination}/stitched.png")
+    shutil.copy(paths[0], destination)
     
-    for path in paths[1:]:
-        print(path)
-        stitch_show(
-            [f"{destination}/stitched.png", path],
-            save_as=f"{destination}/stitched"
-        )
+    for i, path in enumerate(paths[1:]):
+        print(f"Combining:\n-- {paths[i]}\n-- {paths[i+1]}")
+        stitch_show([destination, path], save_as=destination, automate=automate)
 
 
 
 
-# stitch_show(
-#     [r"images\battersea\raw\53\5307.png", r"images\battersea\raw\52\5211.png"],
-#     save_as=f'images/battersea/stitched/5307-5211'
+stitch_show(
+    [r'images\battersea\raw\2103_v_5122.png', r"images\battersea\raw\2103_v_5047.png",],
+    save_as=r'images\battersea\stitched\east_attach.png',
+    automate=False
+)
+
+# stitch_all(r"images\battersea\raw\*53*.png", r"images\battersea\stitched\1947_south_thames2.png", automate=True)
+
+paths = glob.glob(r"images\battersea\raw\*v_50*")
+path_pattern = re.compile(r"\d{4}")
+order = np.array([int(path_pattern.findall(path)[-1]) for path in paths])
+paths_new = np.array(paths)[(order > 5034) & (order < 5053) ]
+paths_new
+
+stitch_all(paths_new, r"images\battersea\stitched\westminster_east1.png", is_list=True, automate=False)
+# for i, path in enumerate(paths_new):
+#     stitch_show(
+#     [f'images/battersea/stitched/thames_master_{12+i}.png', path,],
+#     save_as=f'images/battersea/stitched/thames_master_{13+i}.png',
+#     automate=False
 # )
 
 
-# stitch_show(
-#     [r"images\battersea\raw\52\5209.png", r"images\battersea\stitched\5305-08-5209-12.png", ],
-#     save_as=r'images\battersea\stitched\5305-08-5209-13'
-# )
-
-
-stitch_show([r"images\battersea\raw\53\5305.png", r"images\battersea\raw\53\5304.png"], save_as=r'images\battersea\stitched\test111')
+x = [1, 2, 3, 4]
+y = x[-1::-1]
+y
