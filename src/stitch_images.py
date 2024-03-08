@@ -132,7 +132,7 @@ def stitch_show(images, is_path=True, automate=True, ratio=0.7, reprojThresh=5, 
     im1 = crop_image(im1)
 
     im1_alt = stitcher.stitch(images[-1::-1], descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
-    im1_alt = crop_image(im1)
+    im1_alt = crop_image(im1_alt)
 
     print(im1.shape, im1.shape[0] * im1.shape[1])
     print(im1_alt.shape, im1_alt.shape[0] * im1_alt.shape[1])
@@ -245,15 +245,10 @@ order = np.array([int(path_pattern.findall(path)[-1]) for path in paths])
 paths_new = np.array(paths)[(order > 5034) & (order < 5053) ]
 paths_new
 
-stitch_all(paths_new, r"images\battersea\stitched\westminster_east1.png", is_list=True, automate=False)
+# stitch_all(paths_new, r"images\battersea\stitched\westminster_east1.png", is_list=True, automate=False)
 # for i, path in enumerate(paths_new):
 #     stitch_show(
 #     [f'images/battersea/stitched/thames_master_{12+i}.png', path,],
 #     save_as=f'images/battersea/stitched/thames_master_{13+i}.png',
 #     automate=False
 # )
-
-
-x = [1, 2, 3, 4]
-y = x[-1::-1]
-y
