@@ -14,7 +14,7 @@ import os
 
 class Stitcher:
 
-    def stitch(self, images, ratio=0.75, reprojThresh=4.0,showMatches=False, inter_flag=0, descriptor='orb'):
+    def stitch(self, images, ratio=0.75, reprojThresh=4.0,showMatches=False, inter_flag=4, descriptor='orb', new_image_on_top=True):
         imageA, imageB = images
         kpsA, featuresA = self.detectAndDescribe(imageA, descriptor)
         kpsB, featuresB = self.detectAndDescribe(imageB, descriptor)
@@ -33,7 +33,7 @@ class Stitcher:
         combined_image[0:imageA.shape[0], 0:imageA.shape[1]] = imageA
 
         # Remove unwanted black pixels caused by superimposing A onto B
-        combined_image = self.patch_black_cells(imageA, imageB_warped, combined_image)
+        combined_image = self.patch_black_cells(imageA, imageB_warped, combined_image, b_on_top=new_image_on_top)
 
 
         # check to see if the keypoint matches should be visualized
@@ -96,63 +96,59 @@ class Stitcher:
         return matches, H, status
 
     def drawMatches(self, image1, image2, kps1, kps2, matches):
-        output_image = cv2.drawMatches(image1,kps1,image2, kps2,matches[:100],None,flags=2)
-        cv2.imshow('Output image',output_image)
+        output_image = cv2.drawMatches(image1,kps1,image2, kps2,matches[:100], None, flags=2)
+        cv2.imshow('Output image', output_image)
         # return vis
 
         
-    def patch_black_cells(self, imageA, warped, combined):
+    def patch_black_cells(self, imageA, warped, combined, b_on_top=True):
 
-        # black cells in imgA to replace
-        a_black_cells = np.argwhere(imageA == 0)
-        img1_black = pd.DataFrame(a_black_cells)
 
         # indices of warped image B
         b_indices = np.argwhere(warped != 0)
-        b_cells = pd.DataFrame(b_indices)
-
-
+        
+        if b_on_top:
+            combined[b_indices[:, 0], b_indices[:, 1]] = warped[b_indices[:,0], b_indices[:,1]]
+            return combined
+    
+        # black cells in imgA to replace
+        a_black_cells = np.argwhere(imageA == 0)
+        img1_black = pd.DataFrame(a_black_cells)
+        b_cells = pd.DataFrame(b_indices).values
         shared = pd.merge(img1_black, b_cells, how='inner').values
+        combined[shared[:, 0], shared[:, 1]] = warped[shared[:,0], shared[:,1]]
 
-        for i, j in shared:
-            combined[i, j] = warped[i, j]
-
-                    
         return combined
     
 
-def stitch_show(images, is_path=True, automate=True, ratio=0.7, reprojThresh=5, inter_flag=4, descriptor='orb', save_as=None, showMatches=False):
+def stitch_show(images, is_path=True, automate=True, ratio=0.7, reprojThresh=5, inter_flag=4, descriptor='orb', save_as=None, showMatches=False, inside=False, new_image_on_top=True):
     if is_path:
         images = [cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2GRAY)  for image_path in images]
     
+    
+  
+    image_sizes = [image.shape[0] * image.shape[1] for image in images]
+    size_indices = np.argsort(image_sizes, )
+    images = [images[i] for i in size_indices[-1::-1]]
     processed_images = []
     stitcher = Stitcher()
     #determine order of merge:
-    im1 = stitcher.stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
+    im1 = stitcher.stitch(images, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, new_image_on_top=new_image_on_top)
     im1 = crop_image(im1)
+    if inside:
+        cv2.imwrite(save_as, im1)
+        return
 
-    im1_alt = stitcher.stitch(images[-1::-1], descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag)
-    im1_alt = crop_image(im1_alt)
-
-    print(im1.shape, im1.shape[0] * im1.shape[1])
-    print(im1_alt.shape, im1_alt.shape[0] * im1_alt.shape[1])
-
-    if im1_alt.shape[0] * im1_alt.shape[1] > im1.shape[0] * im1.shape[1]:
-        print(im1.shape, im1.shape[0] * im1.shape[1])
-        print(im1_alt.shape, im1_alt.shape[0] * im1_alt.shape[1])
-        im1 = im1_alt
-        images = images[-1::-1]
-    
     
     processed_images.append(im1)
 
 
-    # else:
-    images_flipped = [cv2.flip(image, -1) for image in images[-1::-1]]
+    images_flipped = [cv2.flip(image, -1) for image in images]
     stitched_flipped = stitcher.stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
     im2 = cv2.flip(stitched_flipped, -1)
     im2 = crop_image(im2)
     processed_images.append(im2)
+
 
 
     v_flip = [cv2.flip(image, 0) for image in images]
@@ -162,11 +158,12 @@ def stitch_show(images, is_path=True, automate=True, ratio=0.7, reprojThresh=5, 
     processed_images.append(im3)
 
 
-    images_flipped = [cv2.flip(image, 1) for image in images[-1::-1]]
+    images_flipped = [cv2.flip(image, 1) for image in images]
     stitched_flipped = stitcher.stitch(images_flipped, descriptor='orb', ratio=ratio, reprojThresh=reprojThresh, showMatches=showMatches, inter_flag=inter_flag, )
     im4 = cv2.flip(stitched_flipped, 1)
     im4 = crop_image(im4)
     processed_images.append(im4)
+
 
     if automate:
         image_sizes = [image.shape[0] * image.shape[1] for image in processed_images]
@@ -229,21 +226,68 @@ def stitch_all(paths, destination, is_list=False, automate=True):
         stitch_show([destination, path], save_as=destination, automate=automate)
 
 
+# for i in range(5183, 5207):
+
+#     n = (i - 5183) // 4
+
+#     if (i - 5183) % 4 == 0:
+#         print(n)
+#         stitch_show(
+#             [ fr'images\battersea\raw\2103_v_{i}.png',fr'images\battersea\raw\2103_v_{i+1}.png',],
+#             save_as=rf'images\battersea\stitched\belgravia_{n}.png',
+#             automate=True
+#         )
+#     else:
+#         stitch_show(
+#             [ fr'images\battersea\stitched\belgravia_{n}.png' ,fr'images\battersea\raw\2103_v_{i+1}.png',],
+#             save_as=rf'images\battersea\stitched\belgravia_{n}.png',
+#             automate=True
+#         )
+
+
+# for i in range(6):
+#     if i == 0:
+
+#         stitch_show(
+#         [ fr'images\battersea\stitched\belgravia_{i}.png' ,fr'images\battersea\stitched\belgravia_{i+1}.png'],
+#         save_as=rf'images\battersea\stitched\belgravia.png',
+#         automate=True
+#         )
+
+#     else:
+#         stitch_show(
+#         [ fr'images\battersea\stitched\belgravia.png' ,fr'images\battersea\stitched\belgravia_{i}.png',],
+#         save_as=rf'images\battersea\stitched\belgravia.png',
+#         automate=True
+#         )
 
 
 stitch_show(
-    [r'images\battersea\raw\2103_v_5122.png', r"images\battersea\raw\2103_v_5047.png",],
-    save_as=r'images\battersea\stitched\east_attach.png',
-    automate=False
+[ fr'images\battersea\stitched\thames_master_41.png' ,fr'images\battersea\stitched\5219-5195_6.png'],
+save_as=rf'images\battersea\stitched\thames_master_42.png',
+automate=False,
+inside=True
 )
 
-# stitch_all(r"images\battersea\raw\*53*.png", r"images\battersea\stitched\1947_south_thames2.png", automate=True)
+# import time
 
-paths = glob.glob(r"images\battersea\raw\*v_50*")
-path_pattern = re.compile(r"\d{4}")
-order = np.array([int(path_pattern.findall(path)[-1]) for path in paths])
-paths_new = np.array(paths)[(order > 5034) & (order < 5053) ]
-paths_new
+# t0 = time.time()
+
+# for i in range(10):
+#     stitch_show(
+#     [ fr'images\battersea\stitched\thames_master_{41+i}.png' ,fr'images\battersea\raw\2103_v_52{17+i}.png'], #5120
+#     save_as=rf'images\battersea\stitched\thames_master_{42+i}.png',
+#     automate=False,
+#     inside=True
+#     )
+# dt = time.time() - t0
+# print(dt)
+
+# paths = glob.glob(r"images\battersea\raw\*v_50*")
+# path_pattern = re.compile(r"\d{4}")
+# order = np.array([int(path_pattern.findall(path)[-1]) for path in paths])
+# paths_new = np.array(paths)[(order > 5034) & (order < 5053) ]
+# paths_new
 
 # stitch_all(paths_new, r"images\battersea\stitched\westminster_east1.png", is_list=True, automate=False)
 # for i, path in enumerate(paths_new):
@@ -252,3 +296,4 @@ paths_new
 #     save_as=f'images/battersea/stitched/thames_master_{13+i}.png',
 #     automate=False
 # )
+
